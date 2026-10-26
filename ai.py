@@ -1,9 +1,9 @@
 import os, json, time, datetime
-from typing import Optional
+import inspect
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-import services
+from skills.loader import load_skills, skills_for_user
 
 load_dotenv()
 MODEL = os.getenv("AI_MODEL", "gemini-3.5-flash-lite")
@@ -12,6 +12,7 @@ client = genai.Client(
     http_options=types.HttpOptions(timeout=15000),
 )
 FALLBACK = "The AI assistant is temporarily unavailable. Please try again later."
+SKILLS = load_skills()
 
 _hits = {}
 
@@ -31,45 +32,38 @@ def _clean(x):
     return {"result": json.loads(json.dumps(x, default=str))}
 
 
+def available_skills(user):
+    return skills_for_user(SKILLS, user)
+
+
 def make_tools(db, user, used):
-    def get_headcount(department: Optional[str] = None) -> dict:
-        """Number of employees (active and total). Optional department: Engineering, Sales or Finance."""
-        used.append("get_headcount")
-        return _clean(services.get_headcount(db, user, department))
+    tools = []
+    for skill in available_skills(user):
+        def execute_skill(_skill=skill, **kwargs):
+            used.append(_skill["NAME"])
+            return _clean(_skill["run"](user, db=db, **kwargs))
 
-    def get_attendance_summary(month: Optional[str] = None) -> dict:
-        """Attendance summary and attendance rate. month format YYYY-MM; omit for current month."""
-        used.append("get_attendance_summary")
-        return _clean(services.get_attendance_summary(db, user, month))
-
-    def get_late_comers(month: Optional[str] = None) -> dict:
-        """Employees ranked by number of late arrivals. month format YYYY-MM; omit for current month."""
-        used.append("get_late_comers")
-        return _clean(services.get_late_comers(db, user, month))
-
-    def get_leave_summary() -> dict:
-        """Summary of leave requests (pending, approved, rejected)."""
-        used.append("get_leave_summary")
-        return _clean(services.get_leave_summary(db, user))
-
-    def get_my_leave_balance(leave_type: str) -> dict:
-        """Remaining leave balance of the current user. leave_type must be sick, casual or annual."""
-        used.append("get_my_leave_balance")
-        return _clean(services.get_my_leave_balance(db, user, leave_type))
-
-    def get_payroll_summary() -> dict:
-        """Payroll and salary summary. Only HR is allowed."""
-        used.append("get_payroll_summary")
-        return _clean(services.get_payroll_summary(db, user))
-
-    def search_employees(query: str) -> dict:
-        """Search employees by name or department."""
-        used.append("search_employees")
-        return _clean(services.search_employees(db, user, query))
-
-    return [get_headcount, get_attendance_summary, get_late_comers,
-            get_leave_summary, get_my_leave_balance, get_payroll_summary,
-            search_employees]
+        parameters = []
+        annotations = {}
+        for name, details in skill.get("PARAMETERS", {}).items():
+            parameter_type, required = details
+            parameters.append(inspect.Parameter(
+                name,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=inspect.Parameter.empty if required else None,
+                annotation=parameter_type,
+            ))
+            annotations[name] = parameter_type
+        execute_skill.__name__ = skill["NAME"]
+        execute_skill.__qualname__ = skill["NAME"]
+        execute_skill.__doc__ = skill["DESCRIPTION"]
+        execute_skill.__signature__ = inspect.Signature(
+            parameters,
+            return_annotation=dict,
+        )
+        execute_skill.__annotations__ = {**annotations, "return": dict}
+        tools.append(execute_skill)
+    return tools
 
 
 POLICY = """Company policy (the ONLY policy facts you know):
@@ -85,7 +79,7 @@ POLICY = """Company policy (the ONLY policy facts you know):
 - Only HR can see salaries and payroll; employees only see their own data."""
 
 
-def chat(db, user, message: str) -> dict:
+def chat(db, user, message: str, history=None) -> dict:
     today = datetime.date.today()
     who = f"{getattr(user, 'name', '')} (role: {getattr(user, 'role', '')})"
     system = f"""You are the HR assistant. Today is {today.strftime('%A')} {today.isoformat()}.
@@ -97,10 +91,18 @@ Rules:
 - Keep answers short and clear.
 {POLICY}"""
     used = []
+    contents = [
+        types.Content(
+            role="model" if item["role"] == "assistant" else "user",
+            parts=[types.Part(text=item["content"])],
+        )
+        for item in (history or [])[-4:]
+    ]
+    contents.append(types.Content(role="user", parts=[types.Part(text=message)]))
     try:
         resp = client.models.generate_content(
             model=MODEL,
-            contents=message,
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system,
                 tools=make_tools(db, user, used),

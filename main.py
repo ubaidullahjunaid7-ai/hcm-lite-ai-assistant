@@ -1,9 +1,10 @@
 import json
 from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from fastapi.responses import FileResponse
+from typing import Literal
 
 import models, services, ai
 from db import get_db
@@ -18,8 +19,14 @@ def current_user(x_user_id: int = Header(...), db: Session = Depends(get_db)):
     return user
 
 
+class ChatHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=500)
+
+
 class ChatIn(BaseModel):
     message: str
+    history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=4)
 
 
 def log_ai(db, user, message, result, endpoint="chat"):
@@ -55,6 +62,38 @@ def list_users(db: Session = Depends(get_db)):
     ]
 
 
+@app.get("/skills")
+def list_skills(user=Depends(current_user)):
+    return [
+        {
+            "name": skill["NAME"],
+            "description": skill["DESCRIPTION"],
+            "roles": skill["ROLES"],
+        }
+        for skill in ai.available_skills(user)
+    ]
+
+
+@app.get("/ai/logs")
+def ai_logs(db: Session = Depends(get_db), user=Depends(current_user)):
+    if not services._is_hr(user):
+        raise HTTPException(status_code=403, detail="Only HR/Admin can view AI logs")
+
+    rows = (db.query(models.AILog, models.User.name)
+            .outerjoin(models.User, models.User.id == models.AILog.user_id)
+            .order_by(models.AILog.created_at.desc(), models.AILog.id.desc())
+            .limit(50).all())
+    return [
+        {
+            "user": {"id": log.user_id, "name": user_name},
+            "question": log.question,
+            "tool": log.tool_used,
+            "created_at": log.created_at,
+        }
+        for log, user_name in rows
+    ]
+
+
 @app.get("/kpi")
 def kpi(db: Session = Depends(get_db), user=Depends(current_user)):
     data = {
@@ -73,9 +112,14 @@ def ai_chat(body: ChatIn, db: Session = Depends(get_db), user=Depends(current_us
         raise HTTPException(status_code=400, detail="Message must be 1-500 characters")
     if not ai.rate_ok(user.id):
         raise HTTPException(status_code=429, detail="Rate limit: 20 AI requests per hour")
-    result = ai.chat(db, user, msg)
+    result = ai.chat(db, user, msg, [item.model_dump() for item in body.history])
     log_ai(db, user, msg, result)
-    return {"answer": result["answer"], "ok": result["ok"], "label": "AI-generated"}
+    return {
+        "answer": result["answer"],
+        "ok": result["ok"],
+        "label": "AI-generated",
+        "skill": (result.get("tools") or [None])[0],
+    }
 
 @app.post("/ai/summary")
 def ai_summary(db: Session = Depends(get_db), user=Depends(current_user)):
@@ -115,3 +159,8 @@ def ai_smart_leave(body: LeaveIn, db: Session = Depends(get_db), user=Depends(cu
 @app.get("/")
 def home():
     return FileResponse("index.html")
+
+
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse("dashboard.html")

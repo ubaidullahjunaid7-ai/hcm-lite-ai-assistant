@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy import func, or_
 import models
 
@@ -36,6 +36,82 @@ def get_headcount(db, user, department=None):
     if department:
         q = q.filter(func.lower(models.User.department) == department.lower())
     return {"department": department or "all", "active_employees": q.scalar()}
+
+
+def get_department_report(db, user):
+    if not _is_hr(user):
+        return _denied("Department reports are available to HR only.")
+    rows = (db.query(models.User.department, func.count(models.User.id))
+            .filter(models.User.status == "active")
+            .group_by(models.User.department)
+            .order_by(models.User.department).all())
+    return {"departments": [
+        {"department": department or "Unassigned", "active_employees": count}
+        for department, count in rows
+    ]}
+
+
+def get_team_directory(db, user, department=None):
+    requested_department = (department or "").strip()
+    if not _is_hr(user):
+        own_department = getattr(user, "department", None)
+        if not own_department:
+            return _denied("Your department is not set.")
+        if requested_department and requested_department.lower() != (own_department or "").lower():
+            return _denied("You can only view your own department.")
+        requested_department = own_department
+
+    q = db.query(models.User).filter(models.User.status == "active")
+    if requested_department:
+        q = q.filter(func.lower(models.User.department) == requested_department.lower())
+    rows = q.order_by(models.User.name).all()
+    return {"employees": [
+        {
+            "name": employee.name,
+            "department": employee.department,
+            "job_title": getattr(employee, "job_title", None) or "Not specified",
+        }
+        for employee in rows
+    ]}
+
+
+def get_attendance_trend(db, user):
+    if not _is_hr(user):
+        return _denied("Attendance trends are available to HR only.")
+
+    today = date.today()
+    start = today - timedelta(days=6)
+    rows = (db.query(models.Attendance.date, models.Attendance.status, func.count(models.Attendance.id))
+            .filter(models.Attendance.date >= start, models.Attendance.date <= today)
+            .group_by(models.Attendance.date, models.Attendance.status)
+            .order_by(models.Attendance.date).all())
+
+    counts_by_date = {}
+    for attendance_date, status, count in rows:
+        counts = counts_by_date.setdefault(attendance_date, {})
+        counts[status] = count
+
+    days = []
+    total_records = 0
+    total_attended = 0
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        counts = counts_by_date.get(day, {})
+        total = sum(counts.values())
+        attended = counts.get("present", 0) + counts.get("late", 0)
+        total_records += total
+        total_attended += attended
+        days.append({
+            "date": day.isoformat(),
+            "attendance_rate_percent": round(attended / total * 100, 1) if total else 0.0,
+        })
+
+    return {
+        "start_date": start.isoformat(),
+        "end_date": today.isoformat(),
+        "attendance_rate_percent": round(total_attended / total_records * 100, 1) if total_records else 0.0,
+        "days": days,
+    }
 
 
 def get_attendance_summary(db, user, month=None):

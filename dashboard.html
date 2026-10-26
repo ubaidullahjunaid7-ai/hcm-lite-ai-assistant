@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HCM Lite | HR Dashboard</title>
+<style>
+:root{--ink:#172033;--muted:#6b7280;--line:#e5eaf2;--canvas:#f4f7fb;--brand:#3157d5;--teal:#087f8c;--shadow:0 12px 30px rgba(30,48,84,.07);--surface:#fff}
+body.dark{color-scheme:dark;--ink:#e8edf7;--muted:#a7b0c2;--line:#354056;--canvas:#151b28;--brand:#809aff;--teal:#62d0cb;--shadow:0 12px 30px rgba(0,0,0,.2);--surface:#20283a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--canvas);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--brand);text-decoration:none}
+button{border:0;border-radius:10px;background:var(--brand);color:white;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer}
+button:hover{background:#2444b5}button:disabled{opacity:.55;cursor:wait}
+.topbar{background:var(--surface);border-bottom:1px solid var(--line)}
+.nav{max-width:1120px;margin:auto;padding:13px 24px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font-size:18px;font-weight:800}
+.mark{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:var(--brand);color:white}
+.nav a:last-child{font-size:14px;font-weight:650}
+.nav-actions{display:flex;align-items:center;gap:12px}
+.theme-toggle{background:transparent;color:var(--ink);border:1px solid var(--line);padding:8px 11px}
+.theme-toggle:hover{background:var(--canvas);color:var(--ink)}
+.wrap{max-width:1120px;margin:32px auto;padding:0 24px 48px}
+.eyebrow{color:var(--teal);font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+h1{font-size:clamp(27px,4vw,36px);margin:5px 0}
+.sub{color:var(--muted);margin:0 0 22px}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.card,.box{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:18px;box-shadow:var(--shadow)}
+.num{font-size:30px;font-weight:800;color:var(--brand);line-height:1.2}
+.lbl{color:var(--muted);font-size:13px;margin-top:7px}
+.content{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.box h2{font-size:16px;margin:0 0 14px}
+table{width:100%;border-collapse:collapse}
+td,th{text-align:left;padding:9px 6px;border-bottom:1px solid #edf0f5}
+th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.ai-tag{display:inline-flex;border-radius:999px;background:#edf1ff;color:var(--brand);padding:4px 9px;font-size:11px;font-weight:750}
+.summary{grid-column:1/-1}
+.summary-header{display:flex;align-items:center;gap:10px;margin-bottom:13px}
+.summary-header h2{margin:0}
+.summary ul{padding-left:20px;margin:10px 0 0}
+.summary li{margin:7px 0}
+.status{color:var(--muted);margin-top:12px}.error{color:#b42318}
+.empty{color:var(--muted);font-size:13px}
+.bar-chart{display:grid;gap:12px;margin-top:12px}
+.bar-row{display:grid;grid-template-columns:minmax(70px,110px) 1fr auto;align-items:center;gap:10px}
+.bar-label,.bar-value{font-size:13px;color:var(--muted)}
+.bar-track{height:13px;background:var(--canvas);border-radius:99px;overflow:hidden}
+.bar-fill{height:100%;min-width:0;background:linear-gradient(90deg,var(--brand),var(--teal));border-radius:99px;transition:width .3s ease}
+.summary .status{min-height:24px}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.content{grid-template-columns:1fr}.summary{grid-column:auto}}
+@media(max-width:480px){.nav{padding:11px 14px;gap:10px}.nav-actions{gap:7px}.nav a:last-child{font-size:13px}.wrap{margin:24px auto;padding:0 14px 32px}.cards{gap:9px}.card,.box{padding:14px}.num{font-size:26px}.bar-row{grid-template-columns:70px 1fr auto;gap:7px}.theme-toggle{padding:7px 9px;font-size:13px}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="nav"><a class="brand" href="/"><span class="mark">H</span><span>HCM Lite</span></a><div class="nav-actions"><button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">Dark mode</button><a href="/">Back to assistant</a></div></div></header>
+<main class="wrap">
+  <span class="eyebrow">People operations</span>
+  <h1>HR Dashboard</h1>
+  <p class="sub">Company workforce snapshot · HR Admin · <span id="month">Loading…</span></p>
+  <section class="cards" aria-label="Key performance indicators">
+    <article class="card"><div class="num" id="k-head">—</div><div class="lbl">Active employees</div></article>
+    <article class="card"><div class="num" id="k-rate">—</div><div class="lbl">Attendance rate</div></article>
+    <article class="card"><div class="num" id="k-late">—</div><div class="lbl">Late records</div></article>
+    <article class="card"><div class="num" id="k-abs">—</div><div class="lbl">Absent records</div></article>
+  </section>
+  <section class="content">
+    <article class="box"><h2>Most late arrivals</h2><table><thead><tr><th>Employee</th><th>Late days</th></tr></thead><tbody id="late"></tbody></table></article>
+    <article class="box"><h2>Leave requests</h2><table><thead><tr><th>Type</th><th>Status</th><th>Count</th></tr></thead><tbody id="leaves"></tbody></table></article>
+    <article class="box"><h2>Leave requests by type</h2><div id="leaveChart" class="bar-chart" role="img" aria-label="Leave request counts by type"><p class="empty">Loading leave data…</p></div></article>
+    <article class="box summary"><div class="summary-header"><h2>AI summary</h2><span class="ai-tag">AI-generated</span></div><button id="sumBtn" type="button">Summarize KPIs</button><div class="status" id="sum" aria-live="polite"></div></article>
+  </section>
+</main>
+<script>
+const headers = {"X-User-Id":"1","Content-Type":"application/json"};
+const $ = id => document.getElementById(id);
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 20000);
+  try {
+    return await fetch(url, Object.assign({}, options, {signal:controller.signal}));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function appendCell(row, text) {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  row.appendChild(cell);
+}
+
+async function loadKpi() {
+  const response = await fetchWithTimeout("/kpi", {headers});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "Could not load dashboard data.");
+  $("k-head").textContent = data.headcount.active_employees;
+  $("k-rate").textContent = data.attendance.attendance_rate_percent + "%";
+  $("k-late").textContent = data.attendance.late;
+  $("k-abs").textContent = data.attendance.absent;
+  $("month").textContent = data.attendance.month;
+  data.late_comers.late_comers.forEach(item => {
+    const row = document.createElement("tr");
+    appendCell(row, item.name);
+    appendCell(row, String(item.late_days));
+    $("late").appendChild(row);
+  });
+  data.leaves.leaves.forEach(item => {
+    const row = document.createElement("tr");
+    appendCell(row, item.type);
+    appendCell(row, item.status);
+    appendCell(row, String(item.count));
+    $("leaves").appendChild(row);
+  });
+  if (!data.late_comers.late_comers.length) $("late").innerHTML = '<tr><td colspan="2" class="empty">No late arrivals.</td></tr>';
+  if (!data.leaves.leaves.length) $("leaves").innerHTML = '<tr><td colspan="3" class="empty">No leave records.</td></tr>';
+  renderLeaveChart(data.leaves.leaves);
+}
+
+function renderLeaveChart(leaves) {
+  const chart = $("leaveChart");
+  chart.replaceChildren();
+  const counts = {};
+  leaves.forEach(item => {
+    counts[item.type] = (counts[item.type] || 0) + Number(item.count || 0);
+  });
+  const entries = Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No leave requests to chart.";
+    chart.appendChild(empty);
+    return;
+  }
+  const maxCount = Math.max(...entries.map(entry => entry[1]), 1);
+  entries.forEach(([type, count]) => {
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    const label = document.createElement("span");
+    label.className = "bar-label";
+    label.textContent = type;
+    const track = document.createElement("div");
+    track.className = "bar-track";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = (count / maxCount * 100) + "%";
+    track.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "bar-value";
+    value.textContent = String(count);
+    row.append(label, track, value);
+    chart.appendChild(row);
+  });
+}
+
+$("sumBtn").addEventListener("click", async () => {
+  const output = $("sum");
+  output.textContent = "Thinking...";
+  $("sumBtn").disabled = true;
+  try {
+    const response = await fetchWithTimeout("/ai/summary", {method:"POST",headers});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not summarize.");
+    output.replaceChildren();
+    if (!data.ok) {
+      output.textContent = data.message || "Summary is unavailable right now.";
+      return;
+    }
+    const list = document.createElement("ul");
+    data.bullets.forEach(bullet => {
+      const item = document.createElement("li");
+      item.textContent = bullet;
+      list.appendChild(item);
+    });
+    output.appendChild(list);
+  } catch (error) {
+    output.textContent = error.name === "AbortError"
+      ? "Sorry, the summary took too long. Please try again."
+      : "Sorry, the summary could not be created. Please try again.";
+    output.className = "status error";
+  } finally {
+    $("sumBtn").disabled = false;
+  }
+});
+
+loadKpi().catch(error => {
+  $("month").textContent = "Dashboard unavailable";
+  const status = document.createElement("p");
+  status.className = "status error";
+  status.textContent = error.name === "AbortError"
+    ? "Dashboard loading took too long. Please refresh to try again."
+    : "Dashboard data could not be loaded. Please refresh to try again.";
+  document.querySelector(".content").prepend(status);
+});
+
+const savedTheme = localStorage.getItem("hcm-theme");
+if (savedTheme === "dark") document.body.classList.add("dark");
+function updateThemeToggle() {
+  const isDark = document.body.classList.contains("dark");
+  $("themeToggle").textContent = isDark ? "Light mode" : "Dark mode";
+  $("themeToggle").setAttribute("aria-pressed", String(isDark));
+}
+$("themeToggle").addEventListener("click", () => {
+  document.body.classList.toggle("dark");
+  localStorage.setItem("hcm-theme", document.body.classList.contains("dark") ? "dark" : "light");
+  updateThemeToggle();
+});
+updateThemeToggle();
+</script>
+</body>
+</html>
